@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "Puppetflow Grabber",
+  "version": "0.1.0",
+  "description": "Pick resilient browser automation selectors and send them to Puppetflow.",
+  "icons": {
+    "16": "assets/icons/icon-16.png",
+    "32": "assets/icons/icon-32.png",
+    "48": "assets/icons/icon-48.png",
+    "128": "assets/icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Grab an element selector",
+    "default_popup": "src/popup/index.html",
+    "default_icon": {
+      "16": "assets/icons/icon-16.png",
+      "32": "assets/icons/icon-32.png",
+      "48": "assets/icons/icon-48.png",
+      "128": "assets/icons/icon-128.png"
+    }
+  },
+  "background": {
+    "service_worker": "src/background/service-worker.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["src/content/content-script.ts"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "externally_connectable": {
+    "matches": [
+      "https://*.puppetflow.com/*",
+      "http://localhost/*",
+      "http://127.0.0.1/*"
+    ]
+  },
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "permissions": ["storage", "tabs"],
+  "options_page": "src/options/index.html"
+}

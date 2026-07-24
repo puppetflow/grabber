@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Puppetflow Grabber settings</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      body { margin: 0; background: #07120e; color: #eafff4; }
+      main { width: min(680px, calc(100vw - 40px)); margin: 64px auto; }
+      h1 { margin-bottom: 8px; font-size: 26px; }
+      p { color: #9eb8aa; line-height: 1.55; }
+      .card { margin-top: 28px; padding: 22px; border: 1px solid #214936; border-radius: 14px; background: #0c1c15; }
+      form { display: flex; gap: 10px; }
+      input { flex: 1; min-width: 0; padding: 11px 12px; border: 1px solid #315b47; border-radius: 8px; color: inherit; background: #07120e; }
+      button { padding: 11px 14px; border: 0; border-radius: 8px; color: #07120f; background: #48c591; font-weight: 750; cursor: pointer; }
+      ul { padding: 0; list-style: none; }
+      li { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-top: 1px solid #183728; }
+      li button { padding: 6px 9px; color: #ffb8b8; background: #341717; }
+      .empty { color: #799486; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Puppetflow Grabber</h1>
+      <p>Cloud editors under puppetflow.com are trusted automatically. Add each self-hosted editor origin you want to connect.</p>
+      <section class="card">
+        <form id="origin-form">
+          <input id="origin-input" type="url" placeholder="https://automation.example.com" required />
+          <button type="submit">Trust origin</button>
+        </form>
+        <ul id="origin-list"></ul>
+      </section>
+    </main>
+    <script type="module" src="./options.ts"></script>
+  </body>
+</html>

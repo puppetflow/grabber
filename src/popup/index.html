@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Puppetflow Grabber</title>
+    <style>
+      :root { color-scheme: dark; font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif; }
+      * { box-sizing: border-box; }
+      body {
+        width: 320px;
+        margin: 0;
+        color: #f2f4f2;
+        background: #131613;
+      }
+      main { padding: 18px; }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        margin-bottom: 25px;
+        color: #a6ada7;
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .brand-mark {
+        display: grid;
+        width: 26px;
+        height: 26px;
+        place-items: center;
+        border-radius: 8px;
+        color: #0b120d;
+        background: #48c591;
+      }
+      h1 {
+        margin: 0;
+        color: #f5f7f5;
+        font-size: 20px;
+        font-weight: 650;
+        line-height: 1.15;
+        letter-spacing: -.025em;
+      }
+      .intro {
+        margin: 8px 0 20px;
+        color: #9ba29c;
+        font-size: 12px;
+        line-height: 1.55;
+      }
+      .hint {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 14px;
+        padding: 10px 11px;
+        border: 1px solid #292e2a;
+        border-radius: 10px;
+        color: #8d958f;
+        background: #181c19;
+        font-size: 10px;
+      }
+      .hint svg { flex: 0 0 auto; color: #48c591; }
+      .hint span { flex: 1; }
+      kbd {
+        padding: 3px 6px;
+        border: 1px solid #343a35;
+        border-radius: 5px;
+        color: #8d958f;
+        background: #202521;
+        font: inherit;
+      }
+      button {
+        width: 100%;
+        padding: 11px 13px;
+        border: 0;
+        border-radius: 10px;
+        color: #08100b;
+        background: #48c591;
+        font-size: 12px;
+        font-weight: 650;
+        cursor: pointer;
+        transition: background 120ms ease, transform 120ms ease;
+      }
+      button:hover { background: #3db580; transform: translateY(-1px); }
+      button[data-active] { color: #d4d9d5; background: #272c28; }
+      button:disabled { opacity: .5; cursor: default; }
+      .error { min-height: 13px; margin: 8px 0 0; color: #e69595; font-size: 10px; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="brand">
+        <span class="brand-mark">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+          </svg>
+        </span>
+        Puppetflow Grabber
+      </div>
+      <h1>Pick something.</h1>
+      <p class="intro">Click an element on this tab. Its selector will be copied to your clipboard.</p>
+      <div class="hint">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+        </svg>
+        <span>Hover to preview, click to grab</span>
+        <kbd>Esc</kbd>
+      </div>
+      <button id="toggle-picker" type="button">Pick an element</button>
+      <p class="error" id="error"></p>
+    </main>
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>
