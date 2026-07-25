@@ -157,7 +157,7 @@ const showCopiedToast = () => {
         flex: 0 0 auto;
         place-items: center;
         border-radius: 8px;
-        color: #07120f;
+        color: #fff;
         background: #48c591;
       }
     </style>
@@ -360,7 +360,7 @@ const createOverlay = (standalone: boolean) => {
         overflow: hidden;
         padding: 5px 8px;
         border-radius: 5px;
-        color: #07120f;
+        color: #fff;
         background: var(--pf-brand);
         box-shadow: 0 5px 16px rgba(7, 18, 14, .18);
         text-overflow: ellipsis;

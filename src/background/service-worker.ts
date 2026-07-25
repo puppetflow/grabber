@@ -310,6 +310,7 @@ const toggleStandalonePicker = async (tabId: number) => {
     await chrome.storage.local.set({ [STANDALONE_ONBOARDED_KEY]: true });
     await chrome.action.setPopup({ popup: '' });
     await chrome.action.setBadgeBackgroundColor({ tabId, color: '#48c591' });
+    await chrome.action.setBadgeTextColor({ tabId, color: '#ffffff' });
     await chrome.action.setBadgeText({ tabId, text: 'ON' });
     return { ok: true, active: true };
   } catch {
@@ -368,6 +369,7 @@ chrome.runtime.onMessage.addListener((value: unknown, sender, sendResponse) => {
     tabId,
     color: succeeded ? '#48c591' : '#d84a4a',
   });
+  void chrome.action.setBadgeTextColor({ tabId, color: '#ffffff' });
   void chrome.action.setBadgeText({ tabId, text: succeeded ? '✓' : '!' });
   setTimeout(() => {
     void chrome.action.setBadgeText({ tabId, text: '' });
