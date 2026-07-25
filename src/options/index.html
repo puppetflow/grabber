@@ -69,6 +69,18 @@
         font-size: 14px;
         font-weight: 600;
       }
+      .tool-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+      }
+      .tool-row h2 { margin: 0; }
+      .tool-row p {
+        margin: 3px 0 0;
+        color: var(--text-tertiary);
+        font-size: 12px;
+      }
       label {
         display: block;
         margin-bottom: 6px;
@@ -109,6 +121,17 @@
       }
       button:hover { background: var(--brand-hover); }
       button:focus-visible { outline: 2px solid rgba(16, 185, 129, .24); outline-offset: 2px; }
+      .secondary-button {
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 7px;
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+        background: #fff;
+      }
+      .secondary-button:hover { color: var(--text); background: var(--background); }
+      .secondary-button:disabled { color: #059669; cursor: default; }
       ul { margin: 0; padding: 0; list-style: none; }
       li {
         display: flex;
@@ -145,6 +168,7 @@
         .card-section { padding: 20px; }
         form { flex-direction: column; }
         form button { width: 100%; }
+        .tool-row { align-items: flex-start; flex-direction: column; }
       }
     </style>
   </head>
@@ -173,6 +197,19 @@
         <div class="card-section">
           <h2>Trusted origins</h2>
           <ul id="origin-list"></ul>
+        </div>
+
+        <div class="card-section tool-row">
+          <div>
+            <h2>Onboarding</h2>
+            <p>Show the introduction popup on the next toolbar click.</p>
+          </div>
+          <button class="secondary-button" id="reset-onboarding" type="button">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/>
+            </svg>
+            Reset onboarding
+          </button>
         </div>
       </section>
     </main>
