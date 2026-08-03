@@ -1,16 +1,24 @@
 import { PROTOCOL_VERSION, type ExtensionMessage, type PickerRuntimeMessage } from '../shared/protocol';
-import { createElementSelector } from './selector';
+import {
+  createExtractionOptions,
+  type ExtractionMode,
+  type ExtractionOption,
+} from './selector';
 
 type PickerSession = {
   requestId: string;
   standalone: boolean;
   selecting: boolean;
   hovered: Element | null;
+  selected: Element | null;
+  options: ExtractionOption[];
   documents: Set<Document>;
   cleanups: (() => void)[];
   host: HTMLDivElement;
   outline: HTMLDivElement;
   label: HTMLDivElement;
+  status: HTMLDivElement;
+  menu: HTMLDivElement;
 };
 
 let session: PickerSession | null = null;
@@ -118,7 +126,7 @@ const copySelector = async (selector: string) => {
   }
 };
 
-const showCopiedToast = () => {
+const showCopiedToast = (label: string) => {
   document.querySelector('[data-puppetflow-grabber-toast]')?.remove();
   const host = document.createElement('div');
   host.dataset.puppetflowGrabberToast = '';
@@ -167,7 +175,7 @@ const showCopiedToast = () => {
           <path d="m5 12 4 4L19 6"/>
         </svg>
       </span>
-      Selector copied to clipboard
+      ${label} copied to clipboard
     </div>
   `;
   document.documentElement.appendChild(host);
@@ -188,12 +196,86 @@ const isCrossOriginFrame = (element: Element) => {
   }
 };
 
+const closeExtractionMenu = () => {
+  if (!session) return;
+  session.selecting = false;
+  session.selected = null;
+  session.options = [];
+  session.menu.style.opacity = '0';
+  session.menu.style.pointerEvents = 'none';
+  session.menu.style.transform = 'translate3d(0, 4px, 0) scale(.98)';
+  session.status.textContent = 'Puppetflow Grabber · Click an element · Esc to cancel';
+};
+
+const showExtractionMenu = (element: Element) => {
+  if (!session) return;
+  const bounds = topBounds(element);
+  const menuWidth = 238;
+  const menuHeight = 212;
+  const left = Math.min(
+    Math.max(8, bounds.left),
+    Math.max(8, window.innerWidth - menuWidth - 8),
+  );
+  const preferredTop = bounds.top + bounds.height + 8;
+  const top = preferredTop + menuHeight <= window.innerHeight
+    ? preferredTop
+    : Math.max(8, bounds.top - menuHeight - 8);
+
+  session.menu.style.left = `${left}px`;
+  session.menu.style.top = `${top}px`;
+  session.menu.style.pointerEvents = 'auto';
+  session.menu.style.opacity = '1';
+  session.menu.style.transform = 'translate3d(0, 0, 0) scale(1)';
+  session.status.textContent = 'Choose an extraction format · Esc to go back';
+  session.menu.querySelector<HTMLButtonElement>('[data-extraction-mode]')?.focus();
+};
+
+const completePick = async (option: ExtractionOption) => {
+  if (!session?.selected) return;
+  const target = session.selected;
+  const current = session;
+  const requestId = current.requestId;
+  if (current.standalone && !await copySelector(option.value)) {
+    deactivatePicker('clipboard-failed');
+    sendTerminal({
+      v: PROTOCOL_VERSION,
+      type: 'pick.error',
+      requestId,
+      code: 'CLIPBOARD_FAILED',
+      message: 'The element path was generated but could not be copied.',
+    });
+    return;
+  }
+  if (current.standalone) showCopiedToast(option.label);
+  deactivatePicker('selected');
+  sendTerminal({
+    v: PROTOCOL_VERSION,
+    type: 'pick.result',
+    requestId,
+    selector: option.value,
+    extractionMode: option.mode,
+    extractionLabel: option.label,
+    pageUrl: target.ownerDocument.location.href,
+    tagName: target.localName,
+    matchCount: option.matchCount,
+  });
+};
+
+const handleExtractionChoice = (event: Event) => {
+  const button = (event.target as Element | null)?.closest<HTMLButtonElement>('[data-extraction-mode]');
+  if (!session || !button) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const mode = button.dataset.extractionMode as ExtractionMode | undefined;
+  const option = session.options.find(candidate => candidate.mode === mode);
+  if (option) void completePick(option);
+};
+
 const handlePick = async (event: Event) => {
   if (!session) return;
   if (isOverlayEvent(event)) return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  if (session.selecting) return;
   session.selecting = true;
   const element = deepestElement(event) ?? session.hovered;
   if (!element) {
@@ -212,31 +294,10 @@ const handlePick = async (event: Event) => {
     return;
   }
 
-  const { target, selector, matchCount } = createElementSelector(element);
-  const requestId = session.requestId;
-  const standalone = session.standalone;
-  if (standalone && !await copySelector(selector)) {
-    deactivatePicker('clipboard-failed');
-    sendTerminal({
-      v: PROTOCOL_VERSION,
-      type: 'pick.error',
-      requestId,
-      code: 'CLIPBOARD_FAILED',
-      message: 'The selector was generated but could not be copied.',
-    });
-    return;
-  }
-  if (standalone) showCopiedToast();
-  deactivatePicker('selected');
-  sendTerminal({
-    v: PROTOCOL_VERSION,
-    type: 'pick.result',
-    requestId,
-    selector,
-    pageUrl: target.ownerDocument.location.href,
-    tagName: target.localName,
-    matchCount,
-  });
+  session.selected = element;
+  session.options = createExtractionOptions(element);
+  renderHovered(element);
+  showExtractionMenu(element);
 };
 
 const addDocumentListeners = (documentValue: Document) => {
@@ -244,7 +305,7 @@ const addDocumentListeners = (documentValue: Document) => {
   session.documents.add(documentValue);
 
   const pointerMove = (event: PointerEvent) => {
-    if (!isOverlayEvent(event)) renderHovered(deepestElement(event));
+    if (!session?.selecting && !isOverlayEvent(event)) renderHovered(deepestElement(event));
   };
   const pointerDown = (event: PointerEvent) => {
     if (isOverlayEvent(event)) return;
@@ -258,6 +319,10 @@ const addDocumentListeners = (documentValue: Document) => {
     if (!session) return;
     if (event.key === 'Escape') {
       event.preventDefault();
+      if (session.selecting) {
+        closeExtractionMenu();
+        return;
+      }
       const requestId = session.requestId;
       deactivatePicker('escape');
       sendTerminal({
@@ -268,6 +333,7 @@ const addDocumentListeners = (documentValue: Document) => {
       });
       return;
     }
+    if (session.selecting) return;
     const current = session.hovered;
     if (!current || !['ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
     const next = event.key === 'ArrowUp'
@@ -372,17 +438,102 @@ const createOverlay = (standalone: boolean) => {
           opacity 110ms ease-out;
         will-change: transform, opacity;
       }
+      .extract-menu {
+        position: fixed;
+        box-sizing: border-box;
+        width: 238px;
+        overflow: hidden;
+        padding: 6px;
+        border: 1px solid rgba(255, 255, 255, .11);
+        border-radius: 12px;
+        color: #f4f7f5;
+        background: rgba(18, 21, 19, .98);
+        box-shadow:
+          0 20px 55px rgba(0, 0, 0, .34),
+          0 2px 8px rgba(0, 0, 0, .28);
+        opacity: 0;
+        pointer-events: none;
+        transform: translate3d(0, 4px, 0) scale(.98);
+        transform-origin: top left;
+        transition:
+          opacity 120ms ease,
+          transform 150ms cubic-bezier(.2, .8, .2, 1);
+        font: 500 12px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .extract-title {
+        padding: 7px 9px 6px;
+        color: rgba(244, 247, 245, .5);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+      }
+      .extract-option {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 9px;
+        box-sizing: border-box;
+        padding: 8px 9px;
+        border: 0;
+        border-radius: 7px;
+        color: inherit;
+        background: transparent;
+        cursor: pointer;
+        text-align: left;
+        font: inherit;
+      }
+      .extract-option:hover,
+      .extract-option:focus-visible {
+        outline: none;
+        background: rgba(72, 197, 145, .14);
+      }
+      .extract-option + .extract-option {
+        margin-top: 1px;
+      }
+      .extract-option svg {
+        flex: 0 0 auto;
+        color: #48c591;
+      }
+      .extract-option span {
+        flex: 1;
+      }
     </style>
     <div class="glow"></div>
     <div class="status">Puppetflow Grabber · ${standalone ? 'Click an element to copy its selector' : 'Click an element'} · Esc to cancel</div>
     <div class="outline"></div>
     <div class="label"></div>
+    <div class="extract-menu" role="menu" aria-label="Extraction format">
+      <div class="extract-title">Extract element as</div>
+      <button class="extract-option" type="button" role="menuitem" data-extraction-mode="selector">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m8 9-4 3 4 3m8-6 4 3-4 3m-2-9-4 12"/></svg>
+        <span>Copy Selector</span>
+      </button>
+      <button class="extract-option" type="button" role="menuitem" data-extraction-mode="js-path">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m8 9-4 3 4 3m8-6 4 3-4 3"/></svg>
+        <span>Copy JS Path</span>
+      </button>
+      <button class="extract-option" type="button" role="menuitem" data-extraction-mode="xpath">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M7 12h10M9 18h6"/></svg>
+        <span>Copy XPath</span>
+      </button>
+      <button class="extract-option" type="button" role="menuitem" data-extraction-mode="full-xpath">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+        <span>Copy Full XPath</span>
+      </button>
+      <button class="extract-option" type="button" role="menuitem" data-extraction-mode="minimal">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m20 6-11 11-5-5"/></svg>
+        <span>Copy Minimal Selector</span>
+      </button>
+    </div>
   `;
   document.documentElement.appendChild(host);
   return {
     host,
     outline: root.querySelector<HTMLDivElement>('.outline')!,
     label: root.querySelector<HTMLDivElement>('.label')!,
+    status: root.querySelector<HTMLDivElement>('.status')!,
+    menu: root.querySelector<HTMLDivElement>('.extract-menu')!,
   };
 };
 
@@ -394,10 +545,14 @@ export const activatePicker = (requestId: string, standalone = false) => {
     standalone,
     selecting: false,
     hovered: null,
+    selected: null,
+    options: [],
     documents: new Set(),
     cleanups: [],
     ...overlay,
   };
+  overlay.menu.addEventListener('click', handleExtractionChoice);
+  session.cleanups.push(() => overlay.menu.removeEventListener('click', handleExtractionChoice));
   addDocumentListeners(document);
 
   const observer = new MutationObserver(() => {

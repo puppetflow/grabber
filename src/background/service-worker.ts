@@ -7,7 +7,6 @@ import {
   type ExtensionMessage,
 } from '../shared/protocol';
 
-const TRUSTED_ORIGINS_KEY = 'puppetflow_grabber_trusted_origins';
 const STANDALONE_ONBOARDED_KEY = 'puppetflow_grabber_standalone_onboarded';
 const POPUP_PATH = 'src/popup/index.html';
 const REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
@@ -33,36 +32,14 @@ const syncActionPopup = async () => {
 
 void syncActionPopup();
 
-const getOrigin = (value?: string): string | null => {
-  if (!value) return null;
+const isHttpUrl = (value?: string) => {
+  if (!value) return false;
   try {
     const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin : null;
+    return url.protocol === 'http:' || url.protocol === 'https:';
   } catch {
-    return null;
+    return false;
   }
-};
-
-const isCloudEditorOrigin = (origin: string): boolean => {
-  const url = new URL(origin);
-  return url.hostname === 'puppetflow.com'
-    || url.hostname.endsWith('.puppetflow.com')
-    || url.hostname === 'localhost'
-    || url.hostname === '127.0.0.1';
-};
-
-const getTrustedOrigins = async (): Promise<string[]> => {
-  const result = await chrome.storage.local.get(TRUSTED_ORIGINS_KEY);
-  return Array.isArray(result[TRUSTED_ORIGINS_KEY])
-    ? result[TRUSTED_ORIGINS_KEY].filter((value): value is string => typeof value === 'string')
-    : [];
-};
-
-const isTrustedEditorUrl = async (url?: string): Promise<boolean> => {
-  const origin = getOrigin(url);
-  if (!origin) return false;
-  if (isCloudEditorOrigin(origin)) return true;
-  return (await getTrustedOrigins()).includes(origin);
 };
 
 const postSafely = (port: chrome.runtime.Port, message: ExtensionMessage) => {
@@ -71,6 +48,12 @@ const postSafely = (port: chrome.runtime.Port, message: ExtensionMessage) => {
   } catch {
     // The editor tab can disappear while a terminal message is in flight.
   }
+};
+
+const focusTab = async (tabId: number) => {
+  const tab = await chrome.tabs.get(tabId);
+  await chrome.windows.update(tab.windowId, { focused: true });
+  await chrome.tabs.update(tabId, { active: true });
 };
 
 const finishRequest = async (requestId: string, message: ExtensionMessage, focusEditor = false) => {
@@ -82,7 +65,7 @@ const finishRequest = async (requestId: string, message: ExtensionMessage, focus
 
   postSafely(request.editorPort, message);
   if (focusEditor && request.editorTabId) {
-    await chrome.tabs.update(request.editorTabId, { active: true }).catch(() => undefined);
+    await focusTab(request.editorTabId).catch(() => undefined);
   }
 };
 
@@ -122,23 +105,27 @@ const findOrOpenTargetTab = async (targetUrl: string | null, editorTabId?: numbe
       }
     });
     if (existing?.id) {
-      await chrome.tabs.update(existing.id, { active: true });
+      await focusTab(existing.id);
       return existing.id;
     }
 
     const created = await chrome.tabs.create({ url: targetUrl, active: true });
     if (!created.id) throw new Error('TARGET_TAB_UNAVAILABLE');
+    await focusTab(created.id);
     return created.id;
   }
 
   const active = tabs.find(tab => tab.active && tab.id !== editorTabId && tab.id && /^https?:/i.test(tab.url ?? ''));
-  if (active?.id) return active.id;
+  if (active?.id) {
+    await focusTab(active.id);
+    return active.id;
+  }
 
   const recent = tabs
     .filter(tab => tab.id !== editorTabId && tab.id && /^https?:/i.test(tab.url ?? ''))
     .sort((left, right) => (right.lastAccessed ?? 0) - (left.lastAccessed ?? 0))[0];
   if (!recent?.id) throw new Error('NO_TARGET_TAB');
-  await chrome.tabs.update(recent.id, { active: true });
+  await focusTab(recent.id);
   return recent.id;
 };
 
@@ -258,23 +245,16 @@ const attachEditorPort = (port: chrome.runtime.Port) => {
 };
 
 chrome.runtime.onConnectExternal.addListener(port => {
-  if (!isCloudEditorOrigin(getOrigin(port.sender?.url) ?? 'https://invalid.local')) {
-    port.disconnect();
-    return;
-  }
   attachEditorPort(port);
 });
 
 chrome.runtime.onConnect.addListener(port => {
-  void isTrustedEditorUrl(port.sender?.url ?? port.sender?.tab?.url).then(trusted => {
-    if (trusted) attachEditorPort(port);
-    else port.disconnect();
-  });
+  attachEditorPort(port);
 });
 
 const toggleStandalonePicker = async (tabId: number) => {
   const tab = await chrome.tabs.get(tabId);
-  if (!getOrigin(tab.url)) {
+  if (!isHttpUrl(tab.url)) {
     return { ok: false, active: false, error: 'Chrome does not allow picking on this page.' };
   }
 

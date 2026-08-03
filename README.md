@@ -59,9 +59,7 @@ Hover an element to inspect it, then click to copy its selector. Press `Esc` or 
 
 Puppetflow Core communicates with the extension through the versioned protocol in `src/shared/protocol.ts`.
 
-Hosted editors under `puppetflow.com` are allowed through Chrome's external connection API. Localhost is allowed for development. The Core application can use `VITE_PUPPETFLOW_GRABBER_EXTENSION_ID` when the extension ID is known.
-
-Self-hosted editors use the content-script bridge. Their exact origin must first be added from the extension's **Options** page. Trust is stored locally in Chrome under `puppetflow_grabber_trusted_origins`.
+Any HTTP or HTTPS Puppetflow editor can connect through Chrome's external connection API or the content-script bridge. The Core application can use `VITE_PUPPETFLOW_GRABBER_EXTENSION_ID` when the extension ID is known.
 
 ## Selector strategy
 
@@ -83,7 +81,7 @@ Generated-looking IDs, classes, and attribute values are ignored when possible. 
 - `src/content/picker.ts` handles page interaction, highlighting, keyboard navigation, and clipboard feedback.
 - `src/content/selector.ts` generates selectors.
 - `src/popup/` contains the first-use standalone popup.
-- `src/options/` manages trusted self-hosted origins.
+- `src/options/` contains extension preferences.
 - `public/assets/icons/` contains the Puppetflow extension icons.
 
 ## Browser limitations

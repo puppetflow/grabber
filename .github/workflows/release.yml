@@ -5,6 +5,14 @@ on:
     branches:
       - master
     paths:
+      - '.github/workflows/release.yml'
+      - 'src/**'
+      - 'public/**'
+      - 'manifest.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - 'tsconfig.json'
       - 'version.txt'
       - 'enforce.txt'
   workflow_dispatch:
@@ -90,6 +98,9 @@ jobs:
             -o "release/puppetflow-grabber-v${VERSION}.crx"
 
           rm -f release-key.pem
+
+      - name: Show artifact checksums
+        run: sha256sum release/*.zip release/*.crx
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

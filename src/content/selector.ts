@@ -22,6 +22,15 @@ const isShadowRoot = (root: Node): root is ShadowRoot => (
   root.nodeType === Node.DOCUMENT_FRAGMENT_NODE && 'host' in root
 );
 
+export type ExtractionMode = 'minimal' | 'selector' | 'js-path' | 'xpath' | 'full-xpath';
+
+export type ExtractionOption = {
+  mode: ExtractionMode;
+  label: string;
+  value: string;
+  matchCount: number;
+};
+
 const getRoot = (element: Element): Document | ShadowRoot => {
   const root = element.getRootNode();
   return isShadowRoot(root) ? root : element.ownerDocument;
@@ -175,6 +184,122 @@ const semanticTarget = (element: Element): Element => {
   return descendantCount < documentCount / 2 ? target : element;
 };
 
+const siblingIndex = (element: Element, sameTagOnly: boolean): number => {
+  const siblings = element.parentElement
+    ? [...element.parentElement.children]
+    : [];
+  const comparable = sameTagOnly
+    ? siblings.filter(sibling => sibling.localName === element.localName)
+    : siblings;
+  return comparable.indexOf(element) + 1;
+};
+
+const chromeCssStep = (element: Element): string => {
+  if (element.id) return `#${escapeCss(element.id)}`;
+
+  const tag = element.localName;
+  const root = getRoot(element);
+  const classes = [...element.classList].filter(Boolean);
+  if (classes.length > 0) {
+    const withClasses = `${tag}.${classes.map(escapeCss).join('.')}`;
+    if (queryCount(root, withClasses) === 1) return withClasses;
+  }
+
+  const parent = element.parentElement;
+  if (!parent) return tag;
+  const sameTagSiblings = [...parent.children].filter(child => child.localName === tag);
+  return sameTagSiblings.length > 1
+    ? `${tag}:nth-child(${siblingIndex(element, false)})`
+    : tag;
+};
+
+const createChromeCssPathInRoot = (element: Element): string => {
+  const root = getRoot(element);
+  const steps: string[] = [];
+  let current: Element | null = element;
+
+  while (current) {
+    const step = chromeCssStep(current);
+    steps.unshift(step);
+    const candidate = steps.join(' > ');
+    if (step.startsWith('#') || queryCount(root, candidate) === 1) return candidate;
+    current = current.parentElement;
+  }
+
+  return steps.join(' > ');
+};
+
+const createChromeCssPath = (element: Element): string => {
+  const localPath = createChromeCssPathInRoot(element);
+  const root = getRoot(element);
+  if (isShadowRoot(root)) {
+    return `${createChromeCssPath(root.host)} >>> ${localPath}`;
+  }
+  const frame = root.defaultView?.frameElement;
+  if (frame?.localName === 'iframe') {
+    return `${createChromeCssPath(frame)} >>iframe>> ${localPath}`;
+  }
+  return localPath;
+};
+
+const createJsPath = (element: Element): string => {
+  const local = `querySelector(${JSON.stringify(createChromeCssPathInRoot(element))})`;
+  const root = getRoot(element);
+  if (isShadowRoot(root)) return `${createJsPath(root.host)}.shadowRoot.${local}`;
+  const frame = root.defaultView?.frameElement;
+  if (frame?.localName === 'iframe') return `${createJsPath(frame)}.contentDocument.${local}`;
+  return `document.${local}`;
+};
+
+const quoteXPath = (value: string): string => {
+  if (!value.includes('"')) return `"${value}"`;
+  if (!value.includes("'")) return `'${value}'`;
+  return `concat(${value.split('"').map((part, index) => (
+    `${index > 0 ? `, '"', ` : ''}"${part}"`
+  )).join('')})`;
+};
+
+const xpathStep = (element: Element): string => {
+  const tag = element.localName;
+  const parent = element.parentElement;
+  if (!parent) return tag;
+  const sameTagSiblings = [...parent.children].filter(child => child.localName === tag);
+  return sameTagSiblings.length > 1
+    ? `${tag}[${siblingIndex(element, true)}]`
+    : tag;
+};
+
+const createXPath = (element: Element, full: boolean): string => {
+  const steps: string[] = [];
+  let current: Element | null = element;
+
+  while (current) {
+    if (!full && current.id) {
+      steps.unshift(`*[@id=${quoteXPath(current.id)}]`);
+      return `//${steps.join('/')}`;
+    }
+    steps.unshift(xpathStep(current));
+    current = current.parentElement;
+  }
+
+  return `/${steps.join('/')}`;
+};
+
+const xpathCount = (element: Element, xpath: string): number => {
+  try {
+    const result = element.ownerDocument.evaluate(
+      xpath,
+      element.ownerDocument,
+      null,
+      XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+      null,
+    );
+    return result.snapshotLength;
+  } catch {
+    return 0;
+  }
+};
+
 export const createElementSelector = (element: Element) => {
   const target = semanticTarget(element);
   const selector = createSelectorAcrossBoundaries(target);
@@ -183,4 +308,44 @@ export const createElementSelector = (element: Element) => {
     selector,
     matchCount: queryCount(getRoot(target), createLocalSelector(target)),
   };
+};
+
+export const createExtractionOptions = (element: Element): ExtractionOption[] => {
+  const minimal = createElementSelector(element);
+  const chromeSelector = createChromeCssPath(element);
+  const xpath = createXPath(element, false);
+  const fullXPath = createXPath(element, true);
+
+  return [
+    {
+      mode: 'selector',
+      label: 'Copy Selector',
+      value: chromeSelector,
+      matchCount: queryCount(getRoot(element), createChromeCssPathInRoot(element)),
+    },
+    {
+      mode: 'js-path',
+      label: 'Copy JS Path',
+      value: createJsPath(element),
+      matchCount: 1,
+    },
+    {
+      mode: 'xpath',
+      label: 'Copy XPath',
+      value: xpath,
+      matchCount: xpathCount(element, xpath),
+    },
+    {
+      mode: 'full-xpath',
+      label: 'Copy Full XPath',
+      value: fullXPath,
+      matchCount: xpathCount(element, fullXPath),
+    },
+    {
+      mode: 'minimal',
+      label: 'Copy Minimal Selector',
+      value: minimal.selector,
+      matchCount: minimal.matchCount,
+    },
+  ];
 };

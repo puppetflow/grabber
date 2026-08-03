@@ -29,6 +29,8 @@ export type PickResultMessage = {
   type: 'pick.result';
   requestId: string;
   selector: string;
+  extractionMode: 'minimal' | 'selector' | 'js-path' | 'xpath' | 'full-xpath';
+  extractionLabel: string;
   pageUrl: string;
   tagName: string;
   matchCount: number;
