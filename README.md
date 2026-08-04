@@ -1,3 +1,5 @@
+<a href="https://puppetflow.com"><img src="https://puppetflow.com/public/img/puppetflow-promo-banner.png" width="100%" alt="Puppetflow" /></a>
+
 # Puppetflow Grabber
 
 Puppetflow Grabber is the Chrome extension for selecting page elements without writing CSS selectors by hand. It can send a selector back to the correct field in Puppetflow or copy it to the clipboard when used on its own.
