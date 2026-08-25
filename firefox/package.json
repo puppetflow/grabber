@@ -1,0 +1,22 @@
+{
+  "name": "puppetflow-grabber-firefox",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "tsc --noEmit",
+    "lint:webext": "web-ext lint --source-dir dist"
+  },
+  "devDependencies": {
+    "@types/webextension-polyfill": "^0.12.5",
+    "typescript": "latest",
+    "vite": "latest",
+    "vite-plugin-web-extension": "latest",
+    "web-ext": "^10.6.0"
+  },
+  "dependencies": {
+    "webextension-polyfill": "^0.12.0"
+  }
+}

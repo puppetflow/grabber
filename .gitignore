@@ -1,4 +1,8 @@
 node_modules/
 dist/
+chrome/node_modules/
+chrome/dist/
+firefox/node_modules/
+firefox/dist/
 .DS_Store
 *.pem

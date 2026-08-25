@@ -1,3 +1,4 @@
+import browser from 'webextension-polyfill';
 import {
   EDITOR_CHANNEL,
   PORT_NAME,
@@ -8,7 +9,29 @@ import {
 } from '../shared/protocol';
 import { handlePickerRuntimeMessage } from './picker';
 
-let editorPort: chrome.runtime.Port | null = null;
+let editorPort: browser.Runtime.Port | null = null;
+const activeEditorRequests = new Set<string>();
+let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+
+const syncKeepAlive = () => {
+  if (activeEditorRequests.size === 0 || !editorPort) {
+    if (keepAliveTimer) clearInterval(keepAliveTimer);
+    keepAliveTimer = null;
+    return;
+  }
+  if (keepAliveTimer) return;
+  keepAliveTimer = setInterval(() => {
+    try {
+      editorPort?.postMessage({
+        v: PROTOCOL_VERSION,
+        type: 'bridge.keepalive',
+      });
+    } catch {
+      activeEditorRequests.clear();
+      syncKeepAlive();
+    }
+  }, 20_000);
+};
 
 const postToEditor = (message: unknown) => {
   window.postMessage({
@@ -21,13 +44,20 @@ const postToEditor = (message: unknown) => {
 const connectEditorBridge = () => {
   if (editorPort) return editorPort;
   try {
-    const port = chrome.runtime.connect({ name: PORT_NAME });
+    const port = browser.runtime.connect({ name: PORT_NAME });
     editorPort = port;
     port.onMessage.addListener((message: unknown) => {
-      if (isExtensionMessage(message)) postToEditor(message);
+      if (!isExtensionMessage(message)) return;
+      postToEditor(message);
+      if (message.type !== 'pick.accepted') {
+        activeEditorRequests.delete(message.requestId);
+        syncKeepAlive();
+      }
     });
     port.onDisconnect.addListener(() => {
       editorPort = null;
+      activeEditorRequests.clear();
+      syncKeepAlive();
       postToEditor({
         v: PROTOCOL_VERSION,
         type: 'bridge.disconnected',
@@ -50,25 +80,30 @@ window.addEventListener('message', event => {
   if (!isEditorMessage(message)) return;
   const port = connectEditorBridge();
   if (!port) return;
+  if (message.type === 'pick.start') {
+    activeEditorRequests.add(message.requestId);
+    syncKeepAlive();
+  }
   try {
     port.postMessage(message);
   } catch {
+    activeEditorRequests.delete(message.requestId);
+    syncKeepAlive();
     editorPort = null;
   }
 });
 
-chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
-  if (!message || typeof message !== 'object') return false;
+browser.runtime.onMessage.addListener(async (message: unknown) => {
+  if (!message || typeof message !== 'object') return undefined;
   const candidate = message as Partial<PickerRuntimeMessage>;
   if (
     candidate.v !== PROTOCOL_VERSION
     || typeof candidate.requestId !== 'string'
     || (candidate.type !== 'picker.activate' && candidate.type !== 'picker.deactivate')
-  ) return false;
+  ) return undefined;
 
   handlePickerRuntimeMessage(candidate as PickerRuntimeMessage);
-  sendResponse({ ok: true });
-  return false;
+  return { ok: true };
 });
 
 postToEditor({

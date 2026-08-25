@@ -1,3 +1,4 @@
+import browser from 'webextension-polyfill';
 import { PROTOCOL_VERSION, type ExtensionMessage, type PickerRuntimeMessage } from '../shared/protocol';
 import {
   createExtractionOptions,
@@ -13,6 +14,7 @@ type PickerSession = {
   selected: Element | null;
   options: ExtractionOption[];
   documents: Set<Document>;
+  frames: WeakSet<HTMLIFrameElement>;
   cleanups: (() => void)[];
   host: HTMLDivElement;
   outline: HTMLDivElement;
@@ -102,7 +104,7 @@ const renderHovered = (next: Element | null) => {
 
 const sendTerminal = (message: ExtensionMessage) => {
   try {
-    void chrome.runtime.sendMessage(message).catch(() => {
+    void browser.runtime.sendMessage(message).catch(() => {
       deactivatePicker('extension-context-invalidated');
     });
   } catch {
@@ -175,9 +177,10 @@ const showCopiedToast = (label: string) => {
           <path d="m5 12 4 4L19 6"/>
         </svg>
       </span>
-      ${label} copied to clipboard
+      <span class="toast-message"></span>
     </div>
   `;
+  root.querySelector<HTMLSpanElement>('.toast-message')!.textContent = `${label} copied to clipboard`;
   document.documentElement.appendChild(host);
   const toast = root.querySelector<HTMLDivElement>('.toast')!;
   requestAnimationFrame(() => toast.classList.add('visible'));
@@ -288,7 +291,7 @@ const handlePick = async (event: Event) => {
       type: 'pick.error',
       requestId: session.requestId,
       code: 'CROSS_ORIGIN_IFRAME',
-      message: 'Chrome does not allow inspecting this cross-origin iframe.',
+      message: 'Firefox does not allow inspecting this cross-origin iframe.',
     });
     deactivatePicker('cross-origin-iframe');
     return;
@@ -300,7 +303,22 @@ const handlePick = async (event: Event) => {
   showExtractionMenu(element);
 };
 
-const addDocumentListeners = (documentValue: Document) => {
+const watchFrame = (frame: HTMLIFrameElement) => {
+  if (!session || session.frames.has(frame)) return;
+  session.frames.add(frame);
+  const attachCurrentDocument = () => {
+    try {
+      if (frame.contentDocument) addDocumentListeners(frame.contentDocument);
+    } catch {
+      // Cross-origin frames are represented by their iframe element.
+    }
+  };
+  frame.addEventListener('load', attachCurrentDocument);
+  session.cleanups.push(() => frame.removeEventListener('load', attachCurrentDocument));
+  attachCurrentDocument();
+};
+
+function addDocumentListeners(documentValue: Document) {
   if (!session || session.documents.has(documentValue)) return;
   session.documents.add(documentValue);
 
@@ -359,13 +377,9 @@ const addDocumentListeners = (documentValue: Document) => {
   });
 
   for (const frame of documentValue.querySelectorAll('iframe')) {
-    try {
-      if (frame.contentDocument) addDocumentListeners(frame.contentDocument);
-    } catch {
-      // Cross-origin frames are represented by their iframe element.
-    }
+    watchFrame(frame);
   }
-};
+}
 
 const createOverlay = (standalone: boolean) => {
   const host = document.createElement('div');
@@ -500,7 +514,7 @@ const createOverlay = (standalone: boolean) => {
       }
     </style>
     <div class="glow"></div>
-    <div class="status">Puppetflow Grabber · ${standalone ? 'Click an element to copy its selector' : 'Click an element'} · Esc to cancel</div>
+    <div class="status"></div>
     <div class="outline"></div>
     <div class="label"></div>
     <div class="extract-menu" role="menu" aria-label="Extraction format">
@@ -527,6 +541,9 @@ const createOverlay = (standalone: boolean) => {
       </button>
     </div>
   `;
+  root.querySelector<HTMLDivElement>('.status')!.textContent = standalone
+    ? 'Puppetflow Grabber · Click an element to copy its selector · Esc to cancel'
+    : 'Puppetflow Grabber · Click an element · Esc to cancel';
   document.documentElement.appendChild(host);
   return {
     host,
@@ -548,6 +565,7 @@ export const activatePicker = (requestId: string, standalone = false) => {
     selected: null,
     options: [],
     documents: new Set(),
+    frames: new WeakSet(),
     cleanups: [],
     ...overlay,
   };
@@ -558,11 +576,7 @@ export const activatePicker = (requestId: string, standalone = false) => {
   const observer = new MutationObserver(() => {
     if (!session) return;
     for (const frame of document.querySelectorAll('iframe')) {
-      try {
-        if (frame.contentDocument) addDocumentListeners(frame.contentDocument);
-      } catch {
-        // Cross-origin frames stay selectable as iframe elements.
-      }
+      watchFrame(frame);
     }
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });

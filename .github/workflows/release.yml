@@ -6,13 +6,8 @@ on:
       - master
     paths:
       - '.github/workflows/release.yml'
-      - 'src/**'
-      - 'public/**'
-      - 'manifest.json'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'vite.config.ts'
-      - 'tsconfig.json'
+      - 'chrome/**'
+      - 'firefox/**'
       - 'version.txt'
       - 'enforce.txt'
   workflow_dispatch:
@@ -36,6 +31,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            chrome/package-lock.json
+            firefox/package-lock.json
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -47,33 +45,57 @@ jobs:
         shell: bash
         run: |
           VERSION="$(tr -d '[:space:]' < version.txt)"
-          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]]; then
-            echo "Invalid Chrome extension version: $VERSION" >&2
+          if ! VERSION="$VERSION" node <<'NODE'
+          const value = process.env.VERSION ?? '';
+          const validShape = /^(0|[1-9]\d*)(\.(0|[1-9]\d*)){0,3}$/.test(value);
+          const parts = value.split('.').map(Number);
+          const validParts = parts.every(part => Number.isInteger(part) && part <= 65535);
+          process.exit(validShape && validParts && parts.some(part => part > 0) ? 0 : 1);
+          NODE
+          then
+            echo "Invalid extension version: $VERSION" >&2
             exit 1
           fi
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Apply version to manifest
+      - name: Apply version to browser manifests
         env:
           VERSION: ${{ steps.version.outputs.value }}
         run: |
           node -e "
             const fs = require('node:fs');
-            const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
-            manifest.version = process.env.VERSION;
-            fs.writeFileSync('manifest.json', JSON.stringify(manifest, null, 2) + '\n');
+            for (const path of ['chrome/manifest.json', 'firefox/manifest.json']) {
+              const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
+              manifest.version = process.env.VERSION;
+              fs.writeFileSync(path, JSON.stringify(manifest, null, 2) + '\n');
+            }
           "
 
-      - name: Install dependencies
+      - name: Install Chrome dependencies
+        working-directory: chrome
         run: npm ci
 
-      - name: Build extension
-        run: npm run build
+      - name: Check and build Chrome extension
+        working-directory: chrome
+        run: |
+          npm run lint
+          npm run build
+
+      - name: Install Firefox dependencies
+        working-directory: firefox
+        run: npm ci
+
+      - name: Check, build, and validate Firefox extension
+        working-directory: firefox
+        run: |
+          npm run lint
+          npm run build
+          npm run lint:webext
 
       - name: Install CRX3 packer
-        run: go install github.com/mediabuyerbot/go-crx3/crx3@latest
+        run: go install github.com/mediabuyerbot/go-crx3/crx3@c224f2e57198876ab18740831d142dd12f93c761
 
-      - name: Create ZIP and signed CRX
+      - name: Create browser packages
         env:
           CRX_PRIVATE_KEY_BASE64: ${{ secrets.CRX_PRIVATE_KEY_BASE64 }}
           VERSION: ${{ steps.version.outputs.value }}
@@ -87,17 +109,21 @@ jobs:
           mkdir -p release
           printf '%s' "$CRX_PRIVATE_KEY_BASE64" | base64 --decode > release-key.pem
           chmod 600 release-key.pem
+          trap 'rm -f release-key.pem' EXIT
 
           (
-            cd dist
-            zip -r "../release/puppetflow-grabber-v${VERSION}.zip" .
+            cd chrome/dist
+            zip -r "../../release/puppetflow-grabber-chrome-v${VERSION}.zip" .
           )
 
-          crx3 pack dist \
+          crx3 pack chrome/dist \
             -p release-key.pem \
-            -o "release/puppetflow-grabber-v${VERSION}.crx"
+            -o "release/puppetflow-grabber-chrome-enterprise-v${VERSION}.crx"
 
-          rm -f release-key.pem
+          (
+            cd firefox/dist
+            zip -r "../../release/puppetflow-grabber-firefox-v${VERSION}.zip" .
+          )
 
       - name: Show artifact checksums
         run: sha256sum release/*.zip release/*.crx
@@ -107,8 +133,8 @@ jobs:
         with:
           name: puppetflow-grabber-v${{ steps.version.outputs.value }}
           path: |
-            release/*.zip
-            release/*.crx
+            release/puppetflow-grabber-chrome-*
+            release/puppetflow-grabber-firefox-*
           if-no-files-found: error
 
       - name: Create GitHub Release
@@ -117,6 +143,6 @@ jobs:
           tag_name: v${{ steps.version.outputs.value }}
           generate_release_notes: true
           files: |
-            release/*.zip
-            release/*.crx
+            release/puppetflow-grabber-chrome-*
+            release/puppetflow-grabber-firefox-*
           fail_on_unmatched_files: true

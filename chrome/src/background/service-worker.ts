@@ -8,6 +8,7 @@ import {
 } from '../shared/protocol';
 
 const STANDALONE_ONBOARDED_KEY = 'puppetflow_grabber_standalone_onboarded';
+const STANDALONE_REQUESTS_KEY = 'puppetflow_grabber_standalone_requests';
 const POPUP_PATH = 'src/popup/index.html';
 const REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -23,6 +24,37 @@ type PendingRequest = {
 const pendingRequests = new Map<string, PendingRequest>();
 const standaloneRequests = new Map<number, string>();
 
+const hydrateStandaloneRequests = async () => {
+  const result = await chrome.storage.session.get(STANDALONE_REQUESTS_KEY);
+  const stored = result[STANDALONE_REQUESTS_KEY];
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return;
+  for (const [rawTabId, requestId] of Object.entries(stored)) {
+    const tabId = Number(rawTabId);
+    if (Number.isInteger(tabId) && typeof requestId === 'string') {
+      standaloneRequests.set(tabId, requestId);
+    }
+  }
+};
+
+const standaloneRequestsReady = hydrateStandaloneRequests().catch(() => undefined);
+
+const persistStandaloneRequests = async () => {
+  const value = Object.fromEntries(
+    [...standaloneRequests].map(([tabId, requestId]) => [String(tabId), requestId]),
+  );
+  await chrome.storage.session.set({ [STANDALONE_REQUESTS_KEY]: value }).catch(() => undefined);
+};
+
+const setStandaloneRequest = async (tabId: number, requestId: string) => {
+  standaloneRequests.set(tabId, requestId);
+  await persistStandaloneRequests();
+};
+
+const deleteStandaloneRequest = async (tabId: number) => {
+  if (!standaloneRequests.delete(tabId)) return;
+  await persistStandaloneRequests();
+};
+
 const syncActionPopup = async () => {
   const result = await chrome.storage.local.get(STANDALONE_ONBOARDED_KEY);
   await chrome.action.setPopup({
@@ -30,6 +62,12 @@ const syncActionPopup = async () => {
   });
 };
 
+chrome.runtime.onStartup.addListener(() => {
+  void syncActionPopup();
+});
+chrome.runtime.onInstalled.addListener(() => {
+  void syncActionPopup();
+});
 void syncActionPopup();
 
 const isHttpUrl = (value?: string) => {
@@ -253,6 +291,7 @@ chrome.runtime.onConnect.addListener(port => {
 });
 
 const toggleStandalonePicker = async (tabId: number) => {
+  await standaloneRequestsReady;
   const tab = await chrome.tabs.get(tabId);
   if (!isHttpUrl(tab.url)) {
     return { ok: false, active: false, error: 'Chrome does not allow picking on this page.' };
@@ -267,7 +306,7 @@ const toggleStandalonePicker = async (tabId: number) => {
 
   const activeRequestId = standaloneRequests.get(tabId);
   if (activeRequestId) {
-    standaloneRequests.delete(tabId);
+    await deleteStandaloneRequest(tabId);
     await chrome.tabs.sendMessage(tabId, {
       v: PROTOCOL_VERSION,
       type: 'picker.deactivate',
@@ -286,7 +325,7 @@ const toggleStandalonePicker = async (tabId: number) => {
       requestId,
       standalone: true,
     });
-    standaloneRequests.set(tabId, requestId);
+    await setStandaloneRequest(tabId, requestId);
     await chrome.storage.local.set({ [STANDALONE_ONBOARDED_KEY]: true });
     await chrome.action.setPopup({ popup: '' });
     await chrome.action.setBadgeBackgroundColor({ tabId, color: '#48c591' });
@@ -310,6 +349,51 @@ chrome.action.onClicked.addListener(tab => {
   });
 });
 
+type StandaloneCommand = {
+  type: 'standalone.status' | 'standalone.toggle';
+  tabId?: number;
+};
+
+const handleStandaloneCommand = async (command: StandaloneCommand) => {
+  await standaloneRequestsReady;
+  if (!command.tabId) {
+    return { ok: false, active: false, error: 'No active browser tab.' };
+  }
+  if (command.type === 'standalone.status') {
+    return {
+      ok: true,
+      active: standaloneRequests.has(command.tabId)
+        || [...pendingRequests.values()].some(request => request.targetTabId === command.tabId),
+    };
+  }
+  return toggleStandalonePicker(command.tabId);
+};
+
+const handleTerminalMessage = async (
+  value: ExtensionMessage,
+  senderTabId?: number,
+) => {
+  const request = pendingRequests.get(value.requestId);
+  if (request && request.targetTabId === senderTabId) {
+    await finishRequest(value.requestId, value, value.type === 'pick.result');
+    return;
+  }
+
+  await standaloneRequestsReady;
+  if (!senderTabId || standaloneRequests.get(senderTabId) !== value.requestId) return;
+  await deleteStandaloneRequest(senderTabId);
+  const succeeded = value.type === 'pick.result';
+  await chrome.action.setBadgeBackgroundColor({
+    tabId: senderTabId,
+    color: succeeded ? '#48c591' : '#d84a4a',
+  });
+  await chrome.action.setBadgeTextColor({ tabId: senderTabId, color: '#ffffff' });
+  await chrome.action.setBadgeText({ tabId: senderTabId, text: succeeded ? '✓' : '!' });
+  setTimeout(() => {
+    void chrome.action.setBadgeText({ tabId: senderTabId, text: '' });
+  }, 1800);
+};
+
 chrome.runtime.onMessage.addListener((value: unknown, sender, sendResponse) => {
   if (
     value
@@ -317,47 +401,23 @@ chrome.runtime.onMessage.addListener((value: unknown, sender, sendResponse) => {
     && sender.id === chrome.runtime.id
     && ['standalone.status', 'standalone.toggle'].includes((value as { type?: string }).type ?? '')
   ) {
-    const command = value as { type: 'standalone.status' | 'standalone.toggle'; tabId?: number };
-    if (!command.tabId) {
-      sendResponse({ ok: false, active: false, error: 'No active browser tab.' });
-      return false;
-    }
-    if (command.type === 'standalone.status') {
-      sendResponse({
-        ok: true,
-        active: standaloneRequests.has(command.tabId)
-          || [...pendingRequests.values()].some(request => request.targetTabId === command.tabId),
-      });
-      return false;
-    }
-    void toggleStandalonePicker(command.tabId).then(sendResponse);
+    void handleStandaloneCommand(value as StandaloneCommand).then(
+      sendResponse,
+      () => sendResponse({ ok: false, active: false, error: 'Grabber could not process this request.' }),
+    );
     return true;
   }
 
   if (!isExtensionMessage(value)) return;
-  const request = pendingRequests.get(value.requestId);
-  if (request && request.targetTabId === sender.tab?.id) {
-    void finishRequest(value.requestId, value, value.type === 'pick.result');
-    return;
-  }
-
-  const tabId = sender.tab?.id;
-  if (!tabId || standaloneRequests.get(tabId) !== value.requestId) return;
-  standaloneRequests.delete(tabId);
-  const succeeded = value.type === 'pick.result';
-  void chrome.action.setBadgeBackgroundColor({
-    tabId,
-    color: succeeded ? '#48c591' : '#d84a4a',
-  });
-  void chrome.action.setBadgeTextColor({ tabId, color: '#ffffff' });
-  void chrome.action.setBadgeText({ tabId, text: succeeded ? '✓' : '!' });
-  setTimeout(() => {
-    void chrome.action.setBadgeText({ tabId, text: '' });
-  }, 1800);
+  void handleTerminalMessage(value, sender.tab?.id).then(
+    () => sendResponse({ ok: true }),
+    () => sendResponse({ ok: false }),
+  );
+  return true;
 });
 
 chrome.tabs.onRemoved.addListener(tabId => {
-  standaloneRequests.delete(tabId);
+  void standaloneRequestsReady.then(() => deleteStandaloneRequest(tabId));
   for (const [requestId, request] of pendingRequests) {
     if (request.targetTabId === tabId) void cancelRequest(requestId, 'target-closed');
     if (request.editorTabId === tabId) void cancelRequest(requestId, 'editor-closed');
@@ -381,6 +441,7 @@ const reactivatePickerAfterNavigation = async (tabId: number) => {
     return;
   }
 
+  await standaloneRequestsReady;
   const standaloneRequestId = standaloneRequests.get(tabId);
   if (!standaloneRequestId) return;
   try {
