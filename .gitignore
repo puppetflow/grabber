@@ -4,5 +4,6 @@ chrome/node_modules/
 chrome/dist/
 firefox/node_modules/
 firefox/dist/
+/release/
 .DS_Store
 *.pem

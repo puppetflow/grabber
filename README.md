@@ -61,6 +61,26 @@ To load the unsigned development build:
 
 Temporary add-ons are removed when Firefox closes. The release workflow produces an unsigned Firefox ZIP for development and review; permanent installation requires Mozilla Add-ons signing.
 
+## Reproduce the Firefox submission
+
+The AMO source build is supported on a 64-bit Linux environment such as Ubuntu 24.04, or on macOS, with a POSIX-compatible shell and internet access to the official npm registry.
+
+Install Node.js 22.x, which includes npm, from [nodejs.org](https://nodejs.org/en/download). No globally installed npm package is required; `npm ci` restores the exact dependency versions from `firefox/package-lock.json`.
+
+From the root of the extracted source archive, run:
+
+```bash
+./bin/build-firefox
+```
+
+The script checks the Node.js version, applies `version.txt` to the Firefox manifest, installs locked dependencies, type-checks the source, creates the production build, validates it with `web-ext`, and writes the reproducible submission archive to:
+
+```text
+release/puppetflow-grabber-firefox-v<version>.zip
+```
+
+The human-readable TypeScript, HTML, manifest, build configuration, lockfile, icons, and build script are included in the source archive. Generated `dist/` files and `node_modules/` are intentionally excluded.
+
 ## Standalone mode
 
 The first toolbar click opens a short introduction. Select **Pick an element**, hover an element, then click it and choose an extraction format. Press `Esc` or click the toolbar icon again to cancel.

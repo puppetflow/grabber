@@ -81,16 +81,8 @@ jobs:
           npm run lint
           npm run build
 
-      - name: Install Firefox dependencies
-        working-directory: firefox
-        run: npm ci
-
-      - name: Check, build, and validate Firefox extension
-        working-directory: firefox
-        run: |
-          npm run lint
-          npm run build
-          npm run lint:webext
+      - name: Reproduce Firefox submission
+        run: ./bin/build-firefox
 
       - name: Install CRX3 packer
         run: go install github.com/mediabuyerbot/go-crx3/crx3@c224f2e57198876ab18740831d142dd12f93c761
@@ -120,10 +112,9 @@ jobs:
             -p release-key.pem \
             -o "release/puppetflow-grabber-chrome-enterprise-v${VERSION}.crx"
 
-          (
-            cd firefox/dist
-            zip -r "../../release/puppetflow-grabber-firefox-v${VERSION}.zip" .
-          )
+          zip -r "release/puppetflow-grabber-firefox-source-v${VERSION}.zip" \
+            README.md version.txt bin/build-firefox firefox \
+            -x 'firefox/node_modules/*' 'firefox/dist/*' 'firefox/.DS_Store'
 
       - name: Show artifact checksums
         run: sha256sum release/*.zip release/*.crx

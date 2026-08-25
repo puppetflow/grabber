@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+manifest="$repo_root/firefox/manifest.json"
+version="$(tr -d '[:space:]' < "$repo_root/version.txt")"
+manifest_backup="$(mktemp)"
+
+cleanup() {
+  cp "$manifest_backup" "$manifest"
+  rm -f "$manifest_backup"
+}
+trap cleanup EXIT
+cp "$manifest" "$manifest_backup"
+
+node_major="$(node --version | cut -d. -f1 | tr -d v)"
+if [[ "$node_major" != "22" ]]; then
+  echo "Node.js 22.x is required; found $(node --version)." >&2
+  exit 1
+fi
+
+VERSION="$version" MANIFEST="$manifest" node <<'NODE'
+const fs = require('node:fs');
+const path = process.env.MANIFEST;
+const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
+manifest.version = process.env.VERSION;
+fs.writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+
+cd "$repo_root/firefox"
+npm ci
+npm run lint
+npm run build
+npm run lint:webext
+npm exec web-ext -- build \
+  --source-dir dist \
+  --artifacts-dir ../release \
+  --filename "puppetflow-grabber-firefox-v${version}.zip" \
+  --overwrite-dest
